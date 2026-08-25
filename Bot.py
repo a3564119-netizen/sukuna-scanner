@@ -1,0 +1,390 @@
+import os
+import time
+import random
+import json
+import re
+import requests
+import threading
+from telebot import TeleBot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+
+# ============================================================
+# 🔥 ENVIRONMENT VARIABLES
+# ============================================================
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHAT_ID = os.getenv("CHAT_ID")  # Optional — apna chat id daalna
+
+if not BOT_TOKEN:
+    raise Exception("❌ BOT_TOKEN not set!")
+
+bot = TeleBot(BOT_TOKEN)
+
+# ============================================================
+# 📊 GLOBALS
+# ============================================================
+hits = 0
+good = 0
+bad = 0
+total = 0
+current_email = "Waiting..."
+is_running = False
+stop_flag = False
+total_hits_list = []
+lock = threading.Lock()
+
+# ============================================================
+# 🔥 CONFIG
+# ============================================================
+CONFIG_URL = "https://raw.githubusercontent.com/a3564119-netizen/Sunraku-Config/main/config.json"
+
+try:
+    data = requests.get(CONFIG_URL, timeout=10).json()
+except:
+    print("❌ Config fetch failed!")
+
+TARGET_TOOL_NAME = "𝐒𝐮𝐧𝐫𝐚𝐤𝐮 × 𝐕𝐄𝐑𝐈𝐅𝐈𝐄𝐃"
+tool = next((t for t in data["tools"] if t["tool_name"] == TARGET_TOOL_NAME), None)
+
+if not tool:
+    print("❌ Tool not found!")
+    sys.exit()
+
+FORCE_JOIN = tool["force_join"]
+CHANNELS = tool["channels"]
+CHECKER_BOT_TOKEN = tool["checker_bot_token"]
+TRACKER_BOT_TOKEN = tool["tracker_bot_token"]
+ADMIN_CHAT_IDS = tool["admins"]
+
+checker_bot = TeleBot(CHECKER_BOT_TOKEN)
+tracker_bot = TeleBot(TRACKER_BOT_TOKEN)
+
+# ============================================================
+# 🔥 CHECK JOIN
+# ============================================================
+def check_join(chat_id):
+    joined = []
+    not_joined = []
+
+    for channel in CHANNELS:
+        cid = int(channel["id"])
+        username = channel["username"]
+
+        try:
+            if not chat_id:
+                not_joined.append(username)
+                continue
+
+            member = checker_bot.get_chat_member(cid, int(chat_id))
+            status = member.status
+
+            if status in ["member", "administrator", "creator"]:
+                joined.append(username)
+            else:
+                not_joined.append(username)
+
+        except:
+            not_joined.append(username)
+
+    return len(not_joined) == 0, not_joined
+
+# ============================================================
+# 🔥 FAST INSTAGRAM CHECKER
+# ============================================================
+class InstagramChecker:
+    def __init__(self):
+        self.session = requests.Session()
+        self.csrf = None
+        self.lsd = None
+        self.doc_id = "26672929172408668"
+        self.lock = threading.Lock()
+
+    def _ensure_tokens(self):
+        with self.lock:
+            if self.csrf and self.lsd:
+                return True
+        try:
+            headers = {
+                'User-Agent': "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+                'x-ig-app-id': "936619743392459",
+                'x-bloks-version-id': "f0fd53409d7667526e529854656fe20159af8b76db89f40c333e593b51a2ce10",
+                'origin': "https://www.instagram.com",
+                'referer': "https://www.instagram.com/",
+            }
+            response = self.session.get('https://www.instagram.com/', headers=headers, timeout=20)
+            if response.status_code == 200:
+                csrf = response.cookies.get('csrftoken', '')
+                match = re.search(r'"LSD",\[\],\{"token":"([^"]+)"\}', response.text)
+                lsd = match.group(1) if match else None
+                if csrf and lsd:
+                    with self.lock:
+                        self.csrf = csrf
+                        self.lsd = lsd
+                    return True
+        except:
+            pass
+        return False
+
+    def check_email(self, email):
+        url = "https://i.instagram.com/api/v1/bloks/async_action/com.bloks.www.caa.ar.search.async/"
+        device = "android-" + ''.join(random.choices('abcdef0123456789', k=16))
+        family = str(uuid.uuid4())
+        android = "android-" + ''.join(random.choices('abcdef0123456789', k=16))
+        waterfall = str(uuid.uuid4())
+
+        payload = {
+            'params': "{\"client_input_params\":{\"aac\":\"{\\\"aac_init_timestamp\\\":"+ str(int(time.time())) +",\\\"aacjid\\\":\\\""+ str(uuid.uuid4()) +"\\\",\\\"aaccs\\\":\\\""+ secrets.token_urlsafe(32) +"\\\"}\",\"flash_call_permissions_status\":{\"READ_PHONE_STATE\":\"PERMANENTLY_DENIED\",\"READ_CALL_LOG\":\"DENIED\",\"ANSWER_PHONE_CALLS\":\"DENIED\"},\"was_headers_prefill_available\":0,\"network_bssid\":null,\"sfdid\":\"\",\"fetched_email_token_list\":{},\"search_query\":\""+ email +"\",\"auth_secure_device_id\":\"\",\"ig_oauth_token\":[],\"cloud_trust_token\":null,\"was_headers_prefill_used\":0,\"sso_accounts_auth_data\":[],\"encrypted_msisdn\":\"\",\"device_network_info\":null,\"text_input_id\":\"akyuf0:61\",\"zero_balance_state\":null,\"android_build_type\":\"release\",\"accounts_list\":[],\"is_oauth_without_permission\":0,\"ig_android_qe_device_id\":\""+ device +"\",\"gms_incoming_call_retriever_eligibility\":\"client_not_supported\",\"search_screen_type\":\"email_or_username\",\"is_whatsapp_installed\":1,\"lois_settings\":{\"lois_token\":\"\"},\"ig_vetted_device_nonce\":null,\"headers_infra_flow_id\":\"\",\"fetched_email_list\":[]},\"server_params\":{\"event_request_id\":\""+ str(uuid.uuid4()) +"\",\"is_from_logged_out\":0,\"layered_homepage_experiment_group\":null,\"device_id\":\""+ android +"\",\"login_surface\":\"login_home\",\"waterfall_id\":\""+ waterfall +"\",\"INTERNAL__latency_qpl_instance_id\":6.3987980400102E13,\"is_platform_login\":0,\"context_data\":\"\",\"login_entry_point\":\"logged_out\",\"INTERNAL__latency_qpl_marker_id\":36707139,\"family_device_id\":\""+ family +"\",\"offline_experiment_group\":\"caa_iteration_v3_perf_ig_4\",\"access_flow_version\":\"pre_mt_behavior\",\"is_from_logged_in_switcher\":0,\"qe_device_id\":\""+ device +"\"}}",
+            'bk_client_context': "{\"bloks_version\":\"5e47baf35c5a270b44c8906c8b99063564b30ef69779f3dee0b828bee2e4ef5b\",\"styles_id\":\"instagram\"}",
+            'bloks_versioning_id': "5e47baf35c5a270b44c8906c8b99063564b30ef69779f3dee0b828bee2e4ef5b"
+        }
+        headers = {
+            'User-Agent': "Instagram 320.0.0.34.109 Android (33/13; 420dpi; 1080x2340; samsung; SM-A546B; a54x; exynos1380; en_US; 465123678)",
+            'accept-language': "en-IN, en-US",
+            'x-bloks-version-id': "5e47baf35c5a270b44c8906c8b99063564b30ef69779f3dee0b828bee2e4ef5b",
+            'x-fb-friendly-name': "IgApi: bloks/async_action/com.bloks.www.caa.ar.search.async/",
+            'x-ig-android-id': android,
+            'x-ig-app-id': "567067343352427",
+            'x-ig-app-locale': "en_IN",
+            'x-ig-client-endpoint': "com.bloks.www.caa.ar.search",
+            'x-ig-device-id': device,
+            'x-ig-family-device-id': family,
+            'x-ig-timezone-offset': str(int(datetime.now().astimezone().utcoffset().total_seconds())),
+            'x-mid': base64.urlsafe_b64encode(secrets.token_bytes(18)).decode().rstrip('='),
+            'x-pigeon-rawclienttime': str(time.time()),
+            'x-pigeon-session-id': f"UFS-{uuid.uuid4()}-0",
+            'sec-ch-ua': '"Google Chrome";v="149", "Chromium";v="149", "Not)A;Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"',
+            'sec-fetch-dest': 'empty',
+            'sec-fetch-mode': 'cors',
+            'sec-fetch-site': 'same-origin',
+        }
+        try:
+            resp = requests.post(url, data=payload, headers=headers, timeout=10)
+            if f"{email}" in resp.text:
+                return True
+            return False
+        except:
+            return False
+
+    def get_user_data(self, user_id):
+        if not self._ensure_tokens():
+            return None
+        url = "https://www.instagram.com/api/graphql"
+        headers = {
+            'User-Agent': "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36",
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'x-bloks-version-id': "f0fd53409d7667526e529854656fe20159af8b76db89f40c333e593b51a2ce10",
+            'x-ig-app-id': '936619743392459',
+            'x-fb-lsd': self.lsd,
+            'x-csrftoken': self.csrf,
+            'x-fb-friendly-name': 'PolarisProfilePageContentQuery',
+            'sec-ch-ua-platform': '"Android"',
+            'origin': 'https://www.instagram.com',
+            'sec-fetch-site': 'same-origin'
+        }
+        cookies = {'rur': '"HIL\\0545636887483\\0541808136332:01fe43b89fcef61b8a466bfa81acf2b1bbab08f406fc99b1da8b7d889fa68683a3364c43"'}
+        variables = {
+            "enable_integrity_filters": True,
+            "id": str(user_id),
+            "__relay_internal__pv__PolarisCannesGuardianExperienceEnabledrelayprovider": True,
+            "__relay_internal__pv__PolarisCASB976ProfileEnabledrelayprovider": False,
+            "__relay_internal__pv__PolarisWebSchoolsEnabledrelayprovider": False,
+            "__relay_internal__pv__PolarisRepostsConsumptionEnabledrelayprovider": False,
+        }
+        payload = {
+            'lsd': self.lsd,
+            'fb_api_caller_class': 'RelayModern',
+            'fb_api_req_friendly_name': 'PolarisProfilePageContentQuery',
+            'variables': json.dumps(variables),
+            'server_timestamps': 'true',
+            'doc_id': self.doc_id,
+        }
+        try:
+            response = self.session.post(url, headers=headers, data=payload, cookies=cookies, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                user = data.get('data', {}).get('user')
+                if user and user.get('username'):
+                    return user
+        except:
+            pass
+        return None
+
+# ============================================================
+# 🚀 FAST SCANNER
+# ============================================================
+def scanner():
+    global hits, good, bad, total, current_email, is_running, stop_flag, total_hits_list
+    
+    insta = InstagramChecker()
+    
+    while not stop_flag:
+        try:
+            user_id = random.randint(2500000000, 21254029834)
+            user_data = insta.get_user_data(user_id)
+            
+            if not user_data:
+                continue
+
+            username = user_data.get('username')
+            if not username:
+                continue
+
+            email = f"{username}@gmail.com"
+            current_email = email
+            total += 1
+
+            if insta.check_email(email):
+                good += 1
+                hits += 1
+                
+                hit_entry = {
+                    'username': username,
+                    'email': email,
+                    'followers': user_data.get('follower_count', 0),
+                    'time': datetime.now().strftime('%H:%M:%S')
+                }
+                with lock:
+                    total_hits_list.append(hit_entry)
+                
+                # 🔥 Hit bhejo
+                hit_msg = f"""
+✅ HIT FOUND!
+👤 @{username}
+📧 {email}
+👥 {user_data.get('follower_count', 0)} followers
+━━━━━━━━━━━━━━━━━━━━━━━━━
+👑 @SunrakuV2 | 📢 @Anishpy
+🎉 500 SUBS SPECIAL
+"""
+                if CHAT_ID:
+                    try:
+                        bot.send_message(CHAT_ID, hit_msg)
+                    except:
+                        pass
+            else:
+                bad += 1
+
+            time.sleep(random.uniform(0.05, 0.15))
+
+        except:
+            time.sleep(random.uniform(0.1, 0.2))
+
+# ============================================================
+# 🔥 BOT COMMANDS
+# ============================================================
+
+def main_menu():
+    markup = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    btn1 = KeyboardButton("🚀 Start Scanner")
+    btn2 = KeyboardButton("⏹ Stop Scanner")
+    btn3 = KeyboardButton("📊 Live Status")
+    btn4 = KeyboardButton("📋 View All Hits")
+    btn5 = KeyboardButton("📢 Channel")
+    btn6 = KeyboardButton("👑 Dev")
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
+    return markup
+
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    welcome_msg = f"""
+☠️ SUNRAKU 500 BOT ☠️
+
+🔥 FAST SCANNER — 30 THREADS
+📌 Hits will be sent to this chat only.
+
+👑 Dev: @SunrakuV2
+📢 Channel: @Anishpy
+🎉 500 SUBS SPECIAL EDITION
+"""
+    bot.reply_to(message, welcome_msg, reply_markup=main_menu())
+
+@bot.message_handler(func=lambda msg: msg.text == "🚀 Start Scanner")
+def start_scanner(message):
+    global is_running, stop_flag
+    
+    if is_running:
+        bot.reply_to(message, "⚠️ Scanner already running!", reply_markup=main_menu())
+        return
+    
+    stop_flag = False
+    is_running = True
+    
+    bot.reply_to(message, f"✅ Scanner started! (30 threads)", reply_markup=main_menu())
+    
+    # 🔥 30 threads start
+    for _ in range(30):
+        threading.Thread(target=scanner, daemon=True).start()
+
+@bot.message_handler(func=lambda msg: msg.text == "⏹ Stop Scanner")
+def stop_scanner(message):
+    global is_running, stop_flag
+    if not is_running:
+        bot.reply_to(message, "⚠️ Scanner not running!", reply_markup=main_menu())
+        return
+    
+    stop_flag = True
+    is_running = False
+    bot.reply_to(message, "⏹ Scanner stopped!", reply_markup=main_menu())
+
+@bot.message_handler(func=lambda msg: msg.text == "📊 Live Status")
+def get_status(message):
+    status_msg = f"""
+┌─────────────────────────────────────────┐
+│  ✦ SUNRAKU 500 BOT ✦                   │
+├─────────────────────────────────────────┤
+│  ✅ GOOD  : {good}  🔥 HITS : {hits}  ❌ BAD : {bad} │
+│  📊 TOTAL : {total}                     │
+│  📧 {current_email[:30]:<30} │
+│  ◈ @SunrakuV2  ●  @Anishpy             │
+└─────────────────────────────────────────┘
+"""
+    bot.reply_to(message, status_msg, reply_markup=main_menu())
+
+@bot.message_handler(func=lambda msg: msg.text == "📋 View All Hits")
+def view_all_hits(message):
+    global total_hits_list
+    
+    if not total_hits_list:
+        bot.reply_to(message, "📋 No hits found yet!", reply_markup=main_menu())
+        return
+    
+    hit_list = "📋 ALL HITS LIST\n━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+    for i, hit in enumerate(total_hits_list, 1):
+        hit_list += f"{i}. @{hit['username']} | {hit['email']} | {hit['followers']} followers\n"
+        if len(hit_list) > 3800:
+            hit_list += "\n... and more!"
+            break
+    
+    hit_list += f"\n━━━━━━━━━━━━━━━━━━━━━━━━━\n📊 Total: {len(total_hits_list)} hits"
+    hit_list += "\n👑 @SunrakuV2 | 📢 @Anishpy"
+    
+    bot.reply_to(message, hit_list, reply_markup=main_menu())
+
+@bot.message_handler(func=lambda msg: msg.text == "📢 Channel")
+def send_channel(message):
+    markup = InlineKeyboardMarkup()
+    for channel in CHANNELS:
+        btn = InlineKeyboardButton(text=channel["username"], url=f"https://t.me/{channel['username'].replace('@', '')}")
+        markup.add(btn)
+    bot.reply_to(message, "📢 Join our channels:", reply_markup=markup)
+
+@bot.message_handler(func=lambda msg: msg.text == "👑 Dev")
+def send_dev(message):
+    markup = InlineKeyboardMarkup()
+    btn = InlineKeyboardButton(text="👑 @SunrakuV2", url="https://t.me/SunrakuV2")
+    markup.add(btn)
+    bot.reply_to(message, "👑 Developer:", reply_markup=markup)
+
+@bot.message_handler(func=lambda msg: True)
+def echo_all(message):
+    bot.reply_to(message, "❌ Use buttons below 👇", reply_markup=main_menu())
+
+# ============================================================
+# 🚀 START BOT
+# ============================================================
+print("✅ Bot is running...")
+try:
+    bot.infinity_polling()
+except:
+    print("❌ Bot stopped.")
